@@ -9,6 +9,7 @@ import { useQuery } from 'react-query';
 import { IVesting } from 'types';
 import { networkDetails } from 'utils/constants';
 import { erc20ABI, useAccount } from 'wagmi';
+import { gql, request } from 'graphql-request';
 
 async function getVestingInfo(userAddress: string | undefined, provider: BaseProvider | null, chainId: number | null) {
   try {
@@ -19,21 +20,60 @@ async function getVestingInfo(userAddress: string | undefined, provider: BasePro
     } else if (!chainId) {
       throw new Error('Cannot get Chain ID');
     } else {
-      const factoryAddress = networkDetails[chainId].vestingFactory;
-      const factoryContract = new ethers.Contract(factoryAddress, vestingFactory, provider);
+      const results: IVesting[] = [];
       const multicall = new Multicall({ ethersProvider: provider, tryAggregate: true });
-      const amtOfContracts = await factoryContract.escrows_length({ gasLimit: 1000000 });
-      const vestingContractsContext: ContractCallContext[] = Array.from({ length: Number(amtOfContracts) }, (_, k) => ({
-        reference: k.toString(),
-        contractAddress: factoryAddress,
-        abi: vestingFactory,
-        calls: [{ reference: 'escrow', methodName: 'escrows', methodParameters: [k] }],
-      }));
-      const vestingContractsResults: ContractCallResults = await multicall.call(vestingContractsContext);
-      const vestingContractInfoContext: ContractCallContext[] = Object.keys(vestingContractsResults.results).map(
-        (p: any) => ({
-          reference: vestingContractsResults.results[p].callsReturnContext[0].returnValues[0],
-          contractAddress: vestingContractsResults.results[p].callsReturnContext[0].returnValues[0],
+      const runMulticall = async (calls: any[]) => {
+        const pending = [];
+        for (let i = 0; i < calls.length; i += 200) {
+          pending.push(multicall.call(calls.slice(i, i + 200)));
+        }
+        return (await Promise.all(pending)).reduce((all, r) => {
+          Object.assign(all, r.results);
+          return all;
+        }, {} as any);
+      };
+      if (chainId === 1) {
+        const GET_ADMIN = gql`
+        {
+          vestingEscrows(where: {admin: "${userAddress.toLowerCase()}"}) {
+            id
+            admin
+            recipient
+            token {
+              id
+              symbol
+              name
+              decimals
+            }
+          }
+        }
+        `;
+        const GET_RECIPIENT = gql`
+        {
+          vestingEscrows(where: {recipient: "${userAddress.toLowerCase()}"}) {
+            id
+            admin
+            recipient
+            token {
+              id
+              symbol
+              name
+              decimals
+            }
+          }
+        }
+        `;
+        const admins = (
+          await request('https://api.thegraph.com/subgraphs/name/nemusonaneko/llamapay-vesting-mainnet', GET_ADMIN)
+        ).vestingEscrows;
+        const recipients = (
+          await request('https://api.thegraph.com/subgraphs/name/nemusonaneko/llamapay-vesting-mainnet', GET_RECIPIENT)
+        ).vestingEscrows;
+        const escrows = admins.concat(recipients);
+
+        const vestingContractInfoContext: ContractCallContext[] = Object.keys(escrows).map((p: any) => ({
+          reference: escrows[p].id,
+          contractAddress: escrows[p].id,
           abi: vestingEscrow,
           calls: [
             { reference: 'unclaimed', methodName: 'unclaimed', methodParameters: [] },
@@ -48,49 +88,107 @@ async function getVestingInfo(userAddress: string | undefined, provider: BasePro
             { reference: 'admin', methodName: 'admin', methodParameters: [] },
             { reference: 'disabled_at', methodName: 'disabled_at', methodParameters: [] },
           ],
-        })
-      );
-      const vestingContractInfoResults = await multicall.call(vestingContractInfoContext);
-      const tokenContractCallContext: ContractCallContext[] = Object.keys(vestingContractInfoResults.results).map(
-        (p: any) => ({
-          reference: vestingContractInfoResults.results[p].callsReturnContext[3].returnValues[0],
-          contractAddress: vestingContractInfoResults.results[p].callsReturnContext[3].returnValues[0],
-          abi: erc20ABI,
-          calls: [
-            { reference: 'name', methodName: 'name', methodParameters: [] },
-            { reference: 'symbol', methodName: 'symbol', methodParameters: [] },
-            { reference: 'decimals', methodName: 'decimals', methodParameters: [] },
-          ],
-        })
-      );
-      const tokenContractCallResults: ContractCallResults = await multicall.call(tokenContractCallContext);
-      const results: IVesting[] = [];
+        }));
+        const vestingContractInfoResults = await runMulticall(vestingContractInfoContext);
+        for (const i in escrows) {
+          const vestingReturnContext = vestingContractInfoResults[escrows[i].id].callsReturnContext;
+          const result = {
+            contract: escrows[i].id,
+            unclaimed: new BigNumber(vestingReturnContext[0].returnValues[0].hex).toString(),
+            locked: new BigNumber(vestingReturnContext[1].returnValues[0].hex).toString(),
+            recipient: escrows[i].recipient,
+            token: escrows[i].token.id,
+            tokenName: escrows[i].token.name,
+            tokenSymbol: escrows[i].token.symbol,
+            tokenDecimals: escrows[i].token.decimals,
+            startTime: new BigNumber(vestingReturnContext[4].returnValues[0].hex).toString(),
+            endTime: new BigNumber(vestingReturnContext[5].returnValues[0].hex).toString(),
+            cliffLength: new BigNumber(vestingReturnContext[6].returnValues[0].hex).toString(),
+            totalLocked: new BigNumber(vestingReturnContext[7].returnValues[0].hex).toString(),
+            totalClaimed: new BigNumber(vestingReturnContext[8].returnValues[0].hex).toString(),
+            admin: escrows[i].admin,
+            disabledAt: new BigNumber(vestingReturnContext[10].returnValues[0].hex).toString(),
+            timestamp: Date.now() / 1e3,
+          };
+          if (results.includes(result)) continue;
+          results.push(result);
+        }
+      } else {
+        const factoryAddress = networkDetails[chainId].vestingFactory;
+        const factoryContract = new ethers.Contract(factoryAddress, vestingFactory, provider);
 
-      for (const key in vestingContractInfoResults.results) {
-        const vestingReturnContext = vestingContractInfoResults.results[key].callsReturnContext;
-        const recipient = vestingReturnContext[2].returnValues[0].toLowerCase();
-        const admin = vestingReturnContext[9].returnValues[0].toLowerCase();
-        if (userAddress.toLowerCase() !== recipient && userAddress.toLowerCase() !== admin) continue;
-        const tokenReturnContext =
-          tokenContractCallResults.results[vestingReturnContext[3].returnValues[0]].callsReturnContext;
-        results.push({
-          contract: key,
-          unclaimed: new BigNumber(vestingReturnContext[0].returnValues[0].hex).toString(),
-          locked: new BigNumber(vestingReturnContext[1].returnValues[0].hex).toString(),
-          recipient: recipient,
-          token: vestingReturnContext[3].returnValues[0],
-          tokenName: tokenReturnContext[0].returnValues[0],
-          tokenSymbol: tokenReturnContext[1].returnValues[0],
-          tokenDecimals: tokenReturnContext[2].returnValues[0],
-          startTime: new BigNumber(vestingReturnContext[4].returnValues[0].hex).toString(),
-          endTime: new BigNumber(vestingReturnContext[5].returnValues[0].hex).toString(),
-          cliffLength: new BigNumber(vestingReturnContext[6].returnValues[0].hex).toString(),
-          totalLocked: new BigNumber(vestingReturnContext[7].returnValues[0].hex).toString(),
-          totalClaimed: new BigNumber(vestingReturnContext[8].returnValues[0].hex).toString(),
-          admin: admin,
-          disabledAt: new BigNumber(vestingReturnContext[10].returnValues[0].hex).toString(),
-          timestamp: Date.now() / 1e3,
-        });
+        const amtOfContracts = await factoryContract.escrows_length({ gasLimit: 1000000 });
+
+        const vestingContractsContext: ContractCallContext[] = Array.from(
+          { length: Number(amtOfContracts) },
+          (_, k) => ({
+            reference: k.toString(),
+            contractAddress: factoryAddress,
+            abi: vestingFactory,
+            calls: [{ reference: 'escrow', methodName: 'escrows', methodParameters: [k] }],
+          })
+        );
+        const vestingContractsResults: any[] = await runMulticall(vestingContractsContext);
+        const vestingContractInfoContext: ContractCallContext[] = Object.keys(vestingContractsResults).map(
+          (p: any) => ({
+            reference: vestingContractsResults[p].callsReturnContext[0].returnValues[0],
+            contractAddress: vestingContractsResults[p].callsReturnContext[0].returnValues[0],
+            abi: vestingEscrow,
+            calls: [
+              { reference: 'unclaimed', methodName: 'unclaimed', methodParameters: [] },
+              { reference: 'locked', methodName: 'locked', methodParameters: [] },
+              { reference: 'recipient', methodName: 'recipient', methodParameters: [] },
+              { reference: 'token', methodName: 'token', methodParameters: [] },
+              { reference: 'startTime', methodName: 'start_time', methodParameters: [] },
+              { reference: 'endTime', methodName: 'end_time', methodParameters: [] },
+              { reference: 'cliffLength', methodName: 'cliff_length', methodParameters: [] },
+              { reference: 'totalLocked', methodName: 'total_locked', methodParameters: [] },
+              { reference: 'totalClaimed', methodName: 'total_claimed', methodParameters: [] },
+              { reference: 'admin', methodName: 'admin', methodParameters: [] },
+              { reference: 'disabled_at', methodName: 'disabled_at', methodParameters: [] },
+            ],
+          })
+        );
+        const vestingContractInfoResults = await runMulticall(vestingContractInfoContext);
+        const tokenContractCallContext: ContractCallContext[] = Object.keys(vestingContractInfoResults).map(
+          (p: any) => ({
+            reference: vestingContractInfoResults[p].callsReturnContext[3].returnValues[0],
+            contractAddress: vestingContractInfoResults[p].callsReturnContext[3].returnValues[0],
+            abi: erc20ABI,
+            calls: [
+              { reference: 'name', methodName: 'name', methodParameters: [] },
+              { reference: 'symbol', methodName: 'symbol', methodParameters: [] },
+              { reference: 'decimals', methodName: 'decimals', methodParameters: [] },
+            ],
+          })
+        );
+        const tokenContractCallResults: any[] = await runMulticall(tokenContractCallContext);
+        for (const key in vestingContractInfoResults) {
+          const vestingReturnContext = vestingContractInfoResults[key].callsReturnContext;
+          const recipient = vestingReturnContext[2].returnValues[0].toLowerCase();
+          const admin = vestingReturnContext[9].returnValues[0].toLowerCase();
+          if (userAddress.toLowerCase() !== recipient && userAddress.toLowerCase() !== admin) continue;
+          const tokenReturnContext =
+            tokenContractCallResults[vestingReturnContext[3].returnValues[0]].callsReturnContext;
+          results.push({
+            contract: key,
+            unclaimed: new BigNumber(vestingReturnContext[0].returnValues[0].hex).toString(),
+            locked: new BigNumber(vestingReturnContext[1].returnValues[0].hex).toString(),
+            recipient: recipient,
+            token: vestingReturnContext[3].returnValues[0],
+            tokenName: tokenReturnContext[0].returnValues[0],
+            tokenSymbol: tokenReturnContext[1].returnValues[0],
+            tokenDecimals: tokenReturnContext[2].returnValues[0],
+            startTime: new BigNumber(vestingReturnContext[4].returnValues[0].hex).toString(),
+            endTime: new BigNumber(vestingReturnContext[5].returnValues[0].hex).toString(),
+            cliffLength: new BigNumber(vestingReturnContext[6].returnValues[0].hex).toString(),
+            totalLocked: new BigNumber(vestingReturnContext[7].returnValues[0].hex).toString(),
+            totalClaimed: new BigNumber(vestingReturnContext[8].returnValues[0].hex).toString(),
+            admin: admin,
+            disabledAt: new BigNumber(vestingReturnContext[10].returnValues[0].hex).toString(),
+            timestamp: Date.now() / 1e3,
+          });
+        }
       }
       return results;
     }
