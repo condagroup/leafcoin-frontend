@@ -3,10 +3,12 @@ import Link from 'next/link';
 import { useAccount } from 'wagmi';
 import { NetworksMenu, Account, WalletSelector } from 'components/Web3';
 import { Logo } from 'components/Icons';
+// import LogoImg from 'public/logos/logo.png';
 import { DisclosureState } from 'ariakit';
 import Menu from './Menu';
 import { useTranslations } from 'next-intl';
 import AppSwitch from './AppSwitch';
+// import Image from 'next/image';
 
 const Header = ({ onboardDialog, walletDialog }: { onboardDialog: DisclosureState; walletDialog: DisclosureState }) => {
   const [{ data }] = useAccount();
@@ -25,6 +27,7 @@ const Header = ({ onboardDialog, walletDialog }: { onboardDialog: DisclosureStat
         <a>
           <span className="sr-only">Navigate to Home Page</span>
           <Logo />
+          {/* <Image src={LogoImg} width="80" height="87" alt="logo" /> */}
         </a>
       </Link>
 

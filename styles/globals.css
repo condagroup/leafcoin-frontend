@@ -4,10 +4,19 @@
 @tailwind components;
 @tailwind utilities;
 
+@font-face {
+  font-family: 'Krungthep';
+  src: url('../public/fonts/Krungthep.ttf');
+}
+
 @layer base {
   html {
     scroll-behavior: smooth;
     font-family: 'Inter', sans-serif;
+  }
+
+  .font-krungthep {
+    font-family: 'Krungthep';
   }
 
   .font-exo {
