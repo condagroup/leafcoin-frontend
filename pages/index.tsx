@@ -1,37 +1,23 @@
-import type { GetServerSideProps, NextPage } from 'next';
-import * as React from 'react';
 import Layout from 'components/Layout';
-import Balance from 'components/Balance';
-import { HistorySection } from 'components/History';
-import { StreamSection } from 'components/Stream';
-import { NO_BANNER } from 'utils/banner';
+import * as React from 'react';
+import { GetServerSideProps, NextPage } from 'next';
+import VestingSection from 'components/Vesting';
 
-interface HomePageProps {
-  noBanner: boolean;
-}
-
-const Home: NextPage<HomePageProps> = () => {
+const Vesting: NextPage = () => {
   return (
-    <Layout className="flex flex-col gap-[30px]">
-      <section className="app-section">
-        <Balance />
-      </section>
-      <section className="app-section flex h-full flex-1 flex-col gap-[50px] py-[22px]">
-        <StreamSection />
-        <HistorySection />
-      </section>
+    <Layout className="app-section mx-auto mt-12 flex w-full flex-col items-center space-y-6 pb-8 dark:bg-lp-gray-8">
+      <VestingSection />
     </Layout>
   );
 };
 
-export const getServerSideProps: GetServerSideProps = async ({ req, locale }) => {
+export const getServerSideProps: GetServerSideProps = async ({ locale }) => {
   // Pass data to the page via props
   return {
     props: {
       messages: (await import(`translations/${locale}.json`)).default,
-      noBanner: req.cookies[NO_BANNER] ?? false,
     },
   };
 };
 
-export default Home;
+export default Vesting;

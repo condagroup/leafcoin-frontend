@@ -29,7 +29,7 @@ const Header = ({ onboardDialog, walletDialog }: { onboardDialog: DisclosureStat
       </Link>
 
       <nav className="flex flex-shrink-0 items-center justify-between gap-[0.625rem]">
-        <AppSwitch />
+        {/* <AppSwitch /> */}
 
         {data ? (
           <>
