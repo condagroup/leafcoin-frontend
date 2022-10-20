@@ -40,6 +40,9 @@
 }
 
 @layer components {
+  .blue-gradient-background {
+    background: linear-gradient(90deg, rgba(2, 0, 36, 1) 0%, rgba(33, 150, 243, 1) 100%, rgba(0, 212, 255, 1) 100%);
+  }
   .app-section {
     @apply px-2 md:px-[30px] lg:px-[60px] xl:px-[120px];
   }
@@ -56,8 +59,13 @@
     @apply shadow-[0px_0px_9px_-2px_rgba(0,0,0,0.16)];
   }
 
-  .nav-button {
+  /* .nav-button {
     @apply shadow-1 rounded-[10px] border border-lp-secondary bg-lp-white py-2 px-4 font-medium text-lp-primary dark:border-transparent dark:bg-lp-green-4 dark:text-lp-white;
+  } */
+
+  .nav-button {
+    @apply shadow-1 rounded-[10px] border border-lp-secondary py-2 px-4 font-medium text-lp-white dark:border-transparent;
+    background: linear-gradient(90deg, rgba(114, 193, 0, 1) 0%, rgba(129, 193, 35, 1) 55%, rgba(82, 121, 25, 1) 100%);
   }
 
   .primary-button {
@@ -128,7 +136,7 @@
 
   /* dialog backdrop */
   [data-backdrop] {
-    background-color: rgb(217 242 244 / 70%);
+    background-color: rgb(0 0 0 / 70%);
   }
 
   .dark [data-backdrop] {
